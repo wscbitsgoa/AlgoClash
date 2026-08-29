@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AlgoClash Visual Desk</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #121212; color: #fff; margin: 20px; }
+        h1 { text-align: center; color: #00cc96; margin-bottom: 20px; }
+        .control-panel { 
+            display: flex; 
+            justify-content: center; 
+            gap: 20px; 
+            background: #1e1e1e; 
+            padding: 15px; 
+            border-radius: 8px; 
+            max-width: 800px; 
+            margin: 0 auto 20px auto; 
+        }
+        .control-group { display: flex; flex-direction: column; }
+        label { font-size: 12px; color: #aaa; margin-bottom: 5px; font-weight: bold; }
+        select { font-size: 14px; padding: 6px 10px; background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 4px; }
+        .chart-box { width: 90%; max-width: 1000px; margin: 20px auto; min-height: 400px; }
+        #status-bar { text-align: center; color: #ffb74d; font-weight: bold; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+    <h1>📈 AlgoClash Market Dashboard</h1>
+    <div id="status-bar">Connecting to backend...</div>
+
+    <div class="control-panel">
+        <div class="control-group">
+            <label for="symbol-select">Select Instrument</label>
+            <select id="symbol-select" onchange="updateCharts()"></select>
+        </div>
+        <div class="control-group">
+            <label for="candle-select">Candle Aggregation Window</label>
+            <select id="candle-select" onchange="updateCharts()">
+                <option value="1">1 Tick (Raw)</option>
+                <option value="3" selected>3 Ticks</option>
+                <option value="5">5 Ticks</option>
+                <option value="10">10 Ticks</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="line-chart" class="chart-box"></div>
+    <div id="candlestick-chart" class="chart-box"></div>
+
+    <script>
+        const API_URL = "http://127.0.0.1:8000";
+        let symbolsLoaded = false;
+
+        async function fetchSymbols() {
+            try {
+                const res = await fetch(`${API_URL}/market/prices`);
+                const data = await res.json();
+                const symbols = Object.keys(data.prices || {});
+                
+                if (symbols.length > 0) {
+                    const select = document.getElementById('symbol-select');
+                    select.innerHTML = '';
+                    symbols.forEach(s => {
+                        const opt = document.createElement('option');
+                        opt.value = s;
+                        opt.textContent = s;
+                        select.appendChild(opt);
+                    });
+                    symbolsLoaded = true;
+                    document.getElementById('status-bar').textContent = "🟢 Live Connected (Updating every 3s)";
+                    updateCharts();
+                } else {
+                    document.getElementById('status-bar').textContent = "🟡 Initializing ticks...";
+                }
+            } catch (err) {
+                document.getElementById('status-bar').textContent = "🔴 Server disconnected. Run backend server first!";
+            }
+        }
+
+        async function updateCharts() {
+            const symbol = document.getElementById('symbol-select').value;
+            if (!symbol) return;
+
+            try {
+                const res = await fetch(`${API_URL}/market/history/${symbol}`);
+                const data = await res.json();
+                const history = data.history || [];
+
+                if (history.length === 0) return;
+
+                const ticks = history.map((_, i) => i + 1);
+
+                // 1. Line Plot
+                Plotly.react('line-chart', [{
+                    x: ticks, y: history, type: 'scatter', mode: 'lines+markers', line: { color: '#00cc96', width: 2 }
+                }], {
+                    title: `${symbol} Live Price Line Graph`,
+                    paper_bgcolor: '#121212', plot_bgcolor: '#121212',
+                    font: { color: '#ffffff' }, xaxis: { title: 'Tick Count' }, yaxis: { title: 'Price ($)' }
+                });
+
+                // 2. Candlestick Plot
+                const windowSize = parseInt(document.getElementById('candle-select').value, 10);
+                const cX = [], open = [], high = [], low = [], close = [];
+
+                for (let i = 0; i < history.length; i += windowSize) {
+                    const chunk = history.slice(i, i + windowSize);
+                    if (chunk.length > 0) {
+                        cX.push(Math.floor(i / windowSize) + 1);
+                        open.push(chunk[0]);
+                        high.push(Math.max(...chunk));
+                        low.push(Math.min(...chunk));
+                        close.push(chunk[chunk.length - 1]);
+                    }
+                }
+
+                Plotly.react('candlestick-chart', [{
+                    x: cX, open: open, high: high, low: low, close: close, type: 'candlestick',
+                    increasing: { line: { color: '#26a69a' } }, decreasing: { line: { color: '#ef5350' } }
+                }], {
+                    title: `${symbol} Candlesticks (${windowSize}-Tick Window)`,
+                    paper_bgcolor: '#121212', plot_bgcolor: '#121212',
+                    font: { color: '#ffffff' }, xaxis: { title: 'Candle Window', rangeslider: { visible: false } }, yaxis: { title: 'Price ($)' }
+                });
+
+            } catch (e) {
+                console.error("Fetch error:", e);
+            }
+        }
+
+        fetchSymbols();
+        setInterval(() => {
+            if (!symbolsLoaded) fetchSymbols();
+            else updateCharts();
+        }, 3000);
+    </script>
+</body>
+</html>
